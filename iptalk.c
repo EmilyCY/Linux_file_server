@@ -8,7 +8,7 @@ each with two processes + the original parent process accepting more connections
 
 Author:  James Hamlyn-Harris
 Last updated: 21-05-2019*/
-
+#define _XOPEN_SOURCE 200
 #include <ctype.h>
 #include <sys/types.h>
 #include <sys/socket.h>
@@ -37,9 +37,9 @@ int pid;
 
 
 static struct sigaction act;
-struct sockaddr_in serverc = {AF_INET, PORT};
+struct sockaddr_in serverc = {AF_INET, PORT}; //family, port in byte order, interbet address
 struct sockaddr_in servers = {AF_INET, PORT, INADDR_ANY};
-struct hostent* hp;
+struct hostent* hp; // h_name: official_name, h_addr: first host address, h_length: length of the address
 
 
 
@@ -49,17 +49,17 @@ struct hostent* hp;
 int main(int argc,char *argv[])
 {
     char address[20];
-    char *iaddress = &address[0];
+    char *iaddress = &address[0]; // to save the host address 
     int newport;
 
     /*find the ip address of host just in case it changes)*/
     hp=gethostbyname(HOST);
-    bcopy(hp->h_addr, &serverc.sin_addr, hp->h_length);
-    strcpy(iaddress, (char*)inet_ntoa(serverc.sin_addr));
+    memmove(hp->h_addr_list[0], &serverc.sin_addr, hp->h_length); // copy host address to IP socket address 
+    strcpy(iaddress, (char*)inet_ntoa(serverc.sin_addr));// convert from binary to string form and save to the memory 
   
 
     if(argc==4)
-    {
+    {   /*sscanf returns number of variables filled */
         if(sscanf(argv[3], "%d", &newport)==1) /*This option allows pairs of users to set up a private*/
         {                                      /* conversation by specifying a different port number. */
             serverc.sin_port = newport;
@@ -75,14 +75,14 @@ int main(int argc,char *argv[])
     if(argc == 3 || argc==4) /*This option allows the program to be used on a server other than default.*/
     {                        /*The gethostname() is not used as this is unreliable in linux and tends to*/
                              /*return a truncated version of the host address. */
-        strcpy(iaddress, argv[2]);
+        strcpy(iaddress, argv[2]); // 3rd arg is the specified server address
 	serverc.sin_addr.s_addr=inet_addr(iaddress);
         printf("Using server at %s\n", iaddress);
     }
     else
         printf("Using server at %s\n", iaddress);
 
-    if (argc>=2 && argc <= 4)
+    if (argc>=2 && argc <= 4) // to find out the choice of a server or on client 
     {
         if(strcmp(argv[1], "server")==0 )
             server();
@@ -105,7 +105,7 @@ int main(int argc,char *argv[])
 /*Act as a server and wait for and receive connections*/
 void server()
 {
-        printf("Running as server. \t ^C to hangup. \n");
+    printf("Running as server. \t ^C to hangup. \n");
 
 	act.sa_handler = catcher;
 	sigfillset(&(act.sa_mask)); 
@@ -139,9 +139,9 @@ void server()
 	
 		pid=fork();
 		if (pid > 0)/*listener*/
-		while(1)
+		while(1) // this is an infinite loop which will run till a break statement is issued
 		{
-			if (recv(newsockfd, &rc, 1, 0) > 0)
+			if (recv(newsockfd, &rc, 1, 0) > 0) //rc is a buffer 
 				if (rc=='\n')
                     printf("\t(from client)\n");
                 else

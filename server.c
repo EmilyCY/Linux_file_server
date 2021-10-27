@@ -1,3 +1,12 @@
+/*ICT60001_A4_103329805.c 
+This program is a simple file server running on linux that transfer files 
+from the directory: /root/server/ to the client directory: /root/client/
+
+Author: Emily Cheng
+ID: 103329805
+Last updated: 27/10/2021
+*/
+
 #define _XOPEN_SOURCE 500 // feature test macro
 #include <ctype.h>
 #include <sys/types.h>
@@ -23,12 +32,11 @@
 #define FILE_NAME_MAX 255
 
 /*function prototypes*/
-void client(char* clientdir);
-void server(char* serverdir);
+void client(char *clientdir);
+void server(char *serverdir);
 void catcher(int sig);
 void sendDirList(char *dirpath, int socket);
 int sendAll(int socket, void *buffer, size_t length, int flags);
-int receiveAll(int socket, void *buffer, size_t length, int flags);
 void listFileNames(int socket);
 void selectFile(int socket, char *filename);
 void sendFileToClient(int socketc);
@@ -59,7 +67,7 @@ int main(int argc, char *argv[])
 	/*find the ip address of host just in case it changes)*/
 	hp = gethostbyname(HOST);
 	memmove(hp->h_addr_list[0], &serverc.sin_addr, hp->h_length); // copy host address to IP socket address
-	strcpy(iaddress, (char *)inet_ntoa(serverc.sin_addr));		// convert from binary to string form and save to the memory
+	strcpy(iaddress, (char *)inet_ntoa(serverc.sin_addr));		  // convert from binary to string form and save to the memory
 
 	if (argc == 4)
 	{											  /*sscanf returns number of variables filled */
@@ -105,7 +113,7 @@ int main(int argc, char *argv[])
 }
 
 /*Act as a server and wait for and receive connections*/
-void server(char* serverdir)
+void server(char *serverdir)
 {
 	char selectedfile[FILE_NAME_MAX + 1];
 	printf("Running as server. \t ^C to hangup. \n");
@@ -142,12 +150,8 @@ void server(char* serverdir)
 
 		printf("Connected\n");
 
-		//pid = fork();
-		//if (pid > 0) /*listener*/
-       
-		sendDirList(serverdir, newsockfd);	
-        sendFileToClient(newsockfd);
-	
+		sendDirList(serverdir, newsockfd);
+		sendFileToClient(newsockfd);
 	}
 }
 
@@ -162,15 +166,15 @@ void catcher(int sig)
 
 /*Make a call to the server
 @param iaddress A char* containing the IP address of the server*/
-void client(char* clientdir)
+void client(char *clientdir)
 {
 	char selectedfile[FILE_NAME_MAX + 1];
 
 	printf("Running as client. \t ^C to hangup. \n");
 
-	// act.sa_handler = catcher;
-	// sigfillset(&(act.sa_mask));
-	// sigaction(SIGINT, &act, NULL); /*catch ^C interupts*/
+	act.sa_handler = catcher;
+	sigfillset(&(act.sa_mask));
+	sigaction(SIGINT, &act, NULL); /*catch ^C interupts*/
 
 	if ((sockfd = socket(AF_INET, SOCK_STREAM, 0)) == -1)
 	{
@@ -184,11 +188,9 @@ void client(char* clientdir)
 		exit(0);
 	}
 
-	//pid = fork();
-	//if (pid > 0) /*listener*/
 	listFileNames(sockfd);
 	selectFile(sockfd, selectedfile);
-	receiveFile(sockfd, clientdir, selectedfile);	
+	receiveFile(sockfd, clientdir, selectedfile);
 }
 
 /* This function sends a list of regular files in the specified directory, ignoring subfolders*/
@@ -201,6 +203,7 @@ void sendDirList(char *dirpath, int socket)
 	int count = 0;
 	int sentcount = 0;
 	char message[30];
+	ssize_t sent;
 
 	if ((directory = opendir(dirpath)) == NULL)
 	{
@@ -216,7 +219,8 @@ void sendDirList(char *dirpath, int socket)
 		if (stat(path, &buffer) == 0 && S_ISREG(buffer.st_mode))
 		{
 			count++;
-			if (sendAll(socket, dp->d_name, strlen(dp->d_name) + 1, 0) != 0)
+			sent = send(socket, dp->d_name, FILE_NAME_MAX + 1, 0);
+			if (sent <= 0)
 			{
 				printf("Sending file name %s failed.\n", dp->d_name);
 				closedir(directory);
@@ -224,15 +228,16 @@ void sendDirList(char *dirpath, int socket)
 			}
 			else
 				sentcount++;
-				printf("%d file name has sent",sentcount);
 		}
 	}
 	if (sentcount == count)
 	{
 		strcpy(message, "end of file list.");
 		sendAll(socket, message, strlen(message) + 1, 0);
+		printf("File list sent to client\n");
 		closedir(directory);
-	}else
+	}
+	else
 	{
 		printf("Sending file list not completed.\n");
 		closedir(directory);
@@ -259,25 +264,6 @@ int sendAll(int socket, void *buffer, size_t length, int flags)
 	return 0;
 }
 
-/*
-This function is to ensure all the data in the buffer are received. It tracks the buffer pointer
-and repeat send() call untill all bytes in buffer are sent or error occured 
-*/
-int receiveAll(int socket, void *buffer, size_t length, int flags)
-{
-	ssize_t n;
-	char *p = buffer;
-	while (length > 0)
-	{
-		n = recv(socket, p, length, flags);
-		if (n <= 0)
-			return -1;
-		p += n;
-		length -= n;
-	}
-	return 0;
-}
-
 /* This function receives and prints a list of recieved file names on the client side*/
 void listFileNames(int socket)
 {
@@ -287,7 +273,7 @@ void listFileNames(int socket)
 	{
 		i++;
 		printf("%s \n", file);
-		if (strcmp(file, "end of file list") == 0)
+		if (strcmp(file, "end of file list.") == 0)
 			break;
 	}
 }
@@ -295,23 +281,33 @@ void listFileNames(int socket)
 /* This functions sends the selected file name to server for download*/
 void selectFile(int socket, char *filename)
 {
-	printf("Please select the file to download or press enter to exit. \n");
-	if (fgets(filename, sizeof(filename), stdin) != NULL) //read user input
+	size_t bytessent;
+	int message = 0;
+	printf("Please enter the file name to download or press enter to exit. \n");
+	if (fgets(filename, FILE_NAME_MAX, stdin) != NULL) //read user input
 	{
 		if (strcmp(filename, "\n") == 0)
 		{
-            close(socket);
-		    exit(0);
+			close(socket);
+			exit(0);
 		}
-			
+		filename[strlen(filename)] = '\0';
 		printf("Requested file: %s \n", filename);
-		if (sendAll(socket, filename, strlen(filename), 0) == -1)
+		
+		while (bytessent = send(socket, filename, strlen(filename), 0) > 0)
+		{
+			message += bytessent;
+			if (message = strlen(filename)) // check null terminate
+				break;
+		}
+		if (bytessent <= 0)
 		{
 			printf("Send file name failed \n");
 			close(socket);
+			exit(0);
 		}
-		else if (sendAll(socket, filename, strlen(filename), 0) == 0)
-			printf("filename is sent to server. \n");
+
+		printf("filename is sent to the server. \n", filename);
 	}
 	else
 	{
@@ -324,22 +320,25 @@ void selectFile(int socket, char *filename)
 void sendFileToClient(int socket)
 {
 	size_t received;
-	int namesize;
+	int namesize = 0;
 	char filename[FILE_NAME_MAX + 1];
-	while (received = recv(socket, filename, sizeof(filename), 0) > 0)
+	int message;
+
+	while ((received = recv(socket, filename + message, sizeof(filename) - message - 1, 0)) > 0)
 	{
-		namesize += received;
-		if (filename[namesize - 1] == '\0') // check NULL terminated string
+		message += received;
+		if (message > strlen(filename) || filename[message - 1] == '\n')
 			break;
 	}
 	if (received <= 0)
 	{
-        printf("Receive filename failed \n");
+		printf("Receive filename failed \n");
 		close(socket);
 	}
-		
 
-	printf("Requested file: %s", filename);
+	filename[message - 1] = '\0';
+	printf("Requested file: %s \n", filename);
+
 	readFileOnServer(filename, socket);
 }
 
@@ -352,15 +351,17 @@ void readFileOnServer(char *filename, int socket)
 	int charcount, writecount;
 	char buffer[1024], error_line[80];
 	DIR *directory;
+	char path[PATH_MAX];
 
 	if (realpath(filename, filepath) == NULL)
 	{
 		printf("%s file path not found. \n", filename);
 		close(socket);
 	}
-    
+
+
 	filesize = checkFileSize(filepath);
-	printf("%s is %ld bytes long", filename, filesize);
+	printf("%s is %d bytes long. \n", filename, filesize);
 	infp = open(filepath, O_RDONLY);
 	if (infp == -1)
 	{
@@ -371,10 +372,11 @@ void readFileOnServer(char *filename, int socket)
 	do
 	{
 		charcount = read(infp, buffer, sizeof(buffer));
-		printf("%zu bytes sending", charcount);
+		printf("%zu bytes sending\n", charcount);
 		writecount = send(socket, buffer, charcount, 0);
 
 	} while (charcount == sizeof(buffer));
+	printf("Finish sending. \n");
 	close(infp);
 	close(socket);
 }
@@ -402,7 +404,7 @@ void receiveFile(int socketc, char *clientdir, char *filename)
 	outfp = open(path, O_WRONLY | O_CREAT | O_EXCL, 0644);
 	if (outfp == -1)
 	{
-		sprintf(error_line, "Error in opening file %s for writing ", filename);
+		sprintf(error_line, "Error in opening file %s for writing \n", filename);
 		perror(error_line);
 		close(outfp);
 		exit(1);
@@ -410,9 +412,13 @@ void receiveFile(int socketc, char *clientdir, char *filename)
 	do
 	{
 		charcount = recv(socketc, buffer, sizeof(buffer), 0);
-		printf("receiving %zu bytes", charcount);
+		printf("receiving %zu bytes \n", charcount);
 		writecount = write(outfp, buffer, charcount);
 	} while (charcount == sizeof(buffer));
+	
+	printf("Finish downloading. \n");
+	printf("Disconnecting...\n");
+	sleep(3);
 	close(outfp);
 	close(socketc);
 }
